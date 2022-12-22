@@ -1,0 +1,5 @@
+bs4
+openai
+python-dotenv
+numpy
+transformers
