@@ -1,6 +1,4 @@
-import os
 import openai
-from dotenv import load_dotenv
 import numpy as np
 from transformers import GPT2TokenizerFast
 import pickle
@@ -10,10 +8,6 @@ COMPLETION_MODEL_NAME = "text-davinci-003"
 
 SEPARATOR = "\n"
 MAX_CONTEXT_LEN = 2048
-
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_TOKEN")
-
 
 def vector_similarity(x, y):
     return np.dot(np.array(x), np.array(y))
@@ -34,8 +28,8 @@ def get_similarities(query_embedding, embeddings):
         in embeddings], reverse=True)
 
 
-def load_embeddings():
-    with open("out/embeddings.pkl", "rb") as f:
+def load_embeddings(embeddings_file):
+    with open(embeddings_file, "rb") as f:
         return pickle.load(f)
 
 
@@ -67,15 +61,13 @@ def get_completion(prompt):
     )
     return response.choices[0].text.strip()
 
-query = "Tell me about 3P"
+def ask(query, embeddings_file):
+    embeddings = load_embeddings(embeddings_file)
+    query_embedding = get_embedding(query)
+    similiarities = get_similarities(query_embedding, embeddings)
+    context = get_context(similiarities)
 
-embeddings = load_embeddings()
-query_embedding = get_embedding(query)
-similiarities = get_similarities(query_embedding, embeddings)
-context = get_context(similiarities)
+    # Borrowed from https://github.com/openai/openai-cookbook/blob/838f000935d9df03e75e181cbcea2e306850794b/examples/Question_answering_using_embeddings.ipynb
+    prompt = f"Answer the question as truthfully as possible using the provided context, and if the answer is not contained within the text below, say \"I don't know.\"\n\nContext:\n{context} \n\nQuestion:\n{query}\n\nAnswer:"
 
-# Borrowed from https://github.com/openai/openai-cookbook/blob/838f000935d9df03e75e181cbcea2e306850794b/examples/Question_answering_using_embeddings.ipynb
-prompt = f"Answer the question as truthfully as possible using the provided context, and if the answer is not contained within the text below, say \"I don't know.\"\n\nContext:\n{context} \n\nQuestion:\n{query}\n\nAnswer:"
-
-response = get_completion(prompt)
-print(response)
+    return get_completion(prompt)
