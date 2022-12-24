@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import pickle
 import re
@@ -7,20 +8,15 @@ import openai
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from transformers import GPT2TokenizerFast
-
-MODEL_NAME = "text-embedding-ada-002"
-USELESS_TEXT_THRESHOLD = 100
+from og import get_og_data
+from ask_embeddings import load_embeddings
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_TOKEN")
 
-
-def get_embedding(text: str) -> list[float]:
-    result = openai.Embedding.create(
-        model=MODEL_NAME,
-        input=text
-    )
-    return result["data"][0]["embedding"]
+MODEL_NAME = "text-embedding-ada-002"
+USELESS_TEXT_THRESHOLD = 100
+SUBSTACK_URL = os.environ["SUBSTACK_URL"]
 
 
 def strip_emoji(text: str):
@@ -40,32 +36,71 @@ def get_issue_slug(file_name):
     return None
 
 
-tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-embeddings = []
-issue_info = {}
+def get_embedding(text: str) -> list[float]:
+    result = openai.Embedding.create(
+        model=MODEL_NAME,
+        input=text
+    )
+    return result["data"][0]["embedding"]
 
-html_files = glob.glob("in/posts/*.html")
 
-for index, html_file in enumerate(html_files):
-    print(f"Processing {html_file}...")
+def compute_embedding(tokenizer, index, file):
+    soup = BeautifulSoup(file, "html.parser")
+    for sibling in soup.children:
+        text = strip_emoji(sibling.get_text(" ", strip=True))
+        if len(text) < USELESS_TEXT_THRESHOLD:
+            continue
+        embedding = get_embedding(text)
+        return (text, embedding, len(tokenizer.tokenize(text)), index)
+
+
+def get_issue_info(html_file):
     issue_slug = get_issue_slug(html_file)
-    with open(html_file, 'r') as file:
-        soup = BeautifulSoup(file, "html.parser")
-        img = soup.find("img", recursive=True)
-        if img is not None:
-            img = img["src"]
-        issue_info[index] = (issue_slug, img)
-        for sibling in soup.children:
-            text = strip_emoji(sibling.get_text(" ", strip=True))
-            if len(text) < USELESS_TEXT_THRESHOLD:
-                continue
-            embedding = get_embedding(text)
-            embeddings.append((text, embedding, len(tokenizer.tokenize(text)), index))
+    url = f"{SUBSTACK_URL}/p/{issue_slug}"
+    og_data = get_og_data(url)
+    return (url, og_data.get("og:image"), og_data.get("og:title"), og_data.get("og:description"))
 
-with open('out/embeddings.pkl', 'wb') as f:
-    pickle.dump({
-        "embeddings": embeddings,
-        "issue_info": issue_info
-    }, f)
 
+def process_files():
+    embeddings = []
+    issue_info = {}
+    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+
+    html_files = glob.glob("in/posts/*.html")
+
+    for index, html_file in enumerate(html_files):
+        print(f"Processing {html_file}...")
+        with open(html_file, 'r') as file:
+            issue_info[index] = get_issue_info(html_file)
+            embeddings.append(compute_embedding(
+                tokenizer, index, file))
+
+    return embeddings, issue_info
+
+def process_files_info_only():
+    issue_info = {}
+
+    html_files = glob.glob("in/posts/*.html")
+
+    for index, html_file in enumerate(html_files):
+        print(f"Processing {html_file}...")
+        with open(html_file, 'r') as file:
+            file_info = get_issue_info(html_file)
+            print(json.dumps(file_info, indent=2))
+            issue_info[index] = file_info
+
+    return issue_info
+
+
+def write_embeddings(embeddings, issue_info):
+    with open('out/embeddings.pkl', 'wb') as f:
+        pickle.dump({
+            "embeddings": embeddings,
+            "issue_info": issue_info
+        }, f)
+
+# embeddings = load_embeddings("in/embeddings.pkl")["embeddings"]
+# issue_info = process_files_info_only()
+embeddings, issue_info = process_files()
+write_embeddings(embeddings, issue_info)
 print("Done!")
