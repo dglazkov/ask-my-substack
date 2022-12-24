@@ -42,11 +42,11 @@ def get_issue_slug(file_name):
 
 tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
 embeddings = []
-issue_info = []
+issue_info = {}
 
 html_files = glob.glob("in/posts/*.html")
 
-for html_file in html_files:
+for index, html_file in enumerate(html_files):
     print(f"Processing {html_file}...")
     issue_slug = get_issue_slug(html_file)
     with open(html_file, 'r') as file:
@@ -54,18 +54,18 @@ for html_file in html_files:
         img = soup.find("img", recursive=True)
         if img is not None:
             img = img["src"]
-        issue_info.append((issue_slug, img))
+        issue_info[index] = (issue_slug, img)
         for sibling in soup.children:
             text = strip_emoji(sibling.get_text(" ", strip=True))
             if len(text) < USELESS_TEXT_THRESHOLD:
                 continue
             embedding = get_embedding(text)
-            embeddings.append((text, embedding, len(tokenizer.tokenize(text))))
+            embeddings.append((text, embedding, len(tokenizer.tokenize(text)), index))
 
 with open('out/embeddings.pkl', 'wb') as f:
-    pickle.dump(embeddings, f)
-
-with open("out/issue_info.pkl", "wb") as f:
-    pickle.dump(issue_info, f)
+    pickle.dump({
+        "embeddings": embeddings,
+        "issue_info": issue_info
+    }, f)
 
 print("Done!")
