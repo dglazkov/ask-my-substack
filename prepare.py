@@ -1,16 +1,19 @@
+import glob
 import os
-from bs4 import BeautifulSoup
+import pickle
+import re
+
 import openai
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from transformers import GPT2TokenizerFast
-import pickle
-import glob
 
 MODEL_NAME = "text-embedding-ada-002"
 USELESS_TEXT_THRESHOLD = 100
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_TOKEN")
+
 
 def get_embedding(text: str) -> list[float]:
     result = openai.Embedding.create(
@@ -21,7 +24,6 @@ def get_embedding(text: str) -> list[float]:
 
 
 def strip_emoji(text: str):
-    import re
     emoji_pattern = re.compile("["
                                u"\U0001F600-\U0001F64F"  # emoticons
                                u"\U0001F300-\U0001F5FF"  # symbols & pictographs
@@ -31,23 +33,39 @@ def strip_emoji(text: str):
     return emoji_pattern.sub(r'', text)
 
 
+def get_issue_slug(file_name):
+    match = re.search(r"(?<=\.)[^.]*(?=\.)", file_name)
+    if match:
+        return match.group()
+    return None
+
+
 tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
 embeddings = []
+issue_info = []
 
 html_files = glob.glob("in/posts/*.html")
 
 for html_file in html_files:
-  print(f"Processing {html_file}...")
-  with open(html_file, 'r') as file:
-    soup = BeautifulSoup(file, "html.parser")
-    for sibling in soup.children:
-        text = strip_emoji(sibling.get_text(" ", strip=True))
-        if len(text) < USELESS_TEXT_THRESHOLD:
-          continue
-        embedding = get_embedding(text)
-        embeddings.append((text, embedding, len(tokenizer.tokenize(text))))
+    print(f"Processing {html_file}...")
+    issue_slug = get_issue_slug(html_file)
+    with open(html_file, 'r') as file:
+        soup = BeautifulSoup(file, "html.parser")
+        img = soup.find("img", recursive=True)
+        if img is not None:
+            img = img["src"]
+        issue_info.append((issue_slug, img))
+        for sibling in soup.children:
+            text = strip_emoji(sibling.get_text(" ", strip=True))
+            if len(text) < USELESS_TEXT_THRESHOLD:
+                continue
+            embedding = get_embedding(text)
+            embeddings.append((text, embedding, len(tokenizer.tokenize(text))))
 
 with open('out/embeddings.pkl', 'wb') as f:
     pickle.dump(embeddings, f)
+
+with open("out/issue_info.pkl", "wb") as f:
+    pickle.dump(issue_info, f)
 
 print("Done!")
